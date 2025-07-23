@@ -24,11 +24,13 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 ORANGE = (255, 165, 0)
 GREEN = (50, 205, 50)
+PINK = (255, 182, 193)
 
 # Physics constants
 GRAVITY = 0.5
 FRICTION = 0.99
 ELASTICITY = 0.7
+DAMPING = 0.98
 
 # Game variables
 score = 0
@@ -37,14 +39,14 @@ blocks = []
 pigs = []
 slingshot_pos = (150, HEIGHT - 200)
 bird_radius = 20
-bird_launched = False
 trajectory_points = []
 power = 0
 angle = 0
 max_power = 30
 game_state = "aiming"  # aiming, flying, game_over
 level = 1
-birds_left = 3
+birds_left = 5
+current_bird_index = 0
 
 class Bird:
     def __init__(self, x, y):
@@ -59,9 +61,17 @@ class Bird:
         self.dragging = False
         self.launched = False
         self.destroyed = False
+        self.trail = []  # For visual trail effect
         
     def draw(self, surface):
         if not self.destroyed:
+            # Draw trail
+            for i, pos in enumerate(self.trail):
+                alpha = int(255 * (i / len(self.trail)))
+                radius = int(self.radius * (i / len(self.trail)))
+                pygame.draw.circle(surface, (self.color[0], self.color[1], self.color[2], alpha), 
+                                  (int(pos[0]), int(pos[1])), max(1, radius))
+            
             # Draw bird body
             pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.radius)
             # Draw eye
@@ -77,12 +87,17 @@ class Bird:
     
     def update(self):
         if self.launched and not self.destroyed:
+            # Add current position to trail
+            self.trail.append((self.x, self.y))
+            if len(self.trail) > 10:
+                self.trail.pop(0)
+            
             # Apply gravity
             self.vy += GRAVITY
             
-            # Apply friction
-            self.vx *= FRICTION
-            self.vy *= FRICTION
+            # Apply air resistance
+            self.vx *= DAMPING
+            self.vy *= DAMPING
             
             # Update position
             self.x += self.vx
@@ -102,7 +117,7 @@ class Bird:
             elif self.y + self.radius > HEIGHT - 100:  # Ground level
                 self.y = HEIGHT - 100 - self.radius
                 self.vy = -self.vy * ELASTICITY
-                self.vx *= 0.9  # Extra friction on ground
+                self.vx *= 0.8  # Extra friction on ground
                 
                 # Stop if moving very slowly
                 if abs(self.vx) < 0.5 and abs(self.vy) < 0.5:
@@ -110,8 +125,8 @@ class Bird:
                     self.vy = 0
                     
             # Check if bird is out of bounds or stopped
-            if (self.x < -50 or self.x > WIDTH + 50 or 
-                self.y > HEIGHT + 50 or 
+            if (self.x < -100 or self.x > WIDTH + 100 or 
+                self.y > HEIGHT + 100 or 
                 (abs(self.vx) < 0.1 and abs(self.vy) < 0.1 and self.y > HEIGHT - 150)):
                 self.destroyed = True
                 return True
@@ -127,11 +142,25 @@ class Bird:
         if self.destroyed:
             return False
             
-        # Simple circle-rectangle collision
-        dx = max(obj.x - self.x, 0, self.x - (obj.x + obj.width)) if self.x < obj.x or self.x > obj.x + obj.width else 0
-        dy = max(obj.y - self.y, 0, self.y - (obj.y + obj.height)) if self.y < obj.y or self.y > obj.y + obj.height else 0
+        # Circle-rectangle collision
+        test_x = self.x
+        test_y = self.y
         
-        return (dx * dx + dy * dy) < (self.radius * self.radius)
+        if self.x < obj.x:
+            test_x = obj.x
+        elif self.x > obj.x + obj.width:
+            test_x = obj.x + obj.width
+            
+        if self.y < obj.y:
+            test_y = obj.y
+        elif self.y > obj.y + obj.height:
+            test_y = obj.y + obj.height
+            
+        dist_x = self.x - test_x
+        dist_y = self.y - test_y
+        distance = math.sqrt(dist_x * dist_x + dist_y * dist_y)
+        
+        return distance <= self.radius
 
 class Block:
     def __init__(self, x, y, width, height, material="wood"):
@@ -142,29 +171,42 @@ class Block:
         self.material = material
         self.health = 100
         self.destroyed = False
+        self.rotation = 0
+        self.angular_velocity = 0
         
         if material == "wood":
             self.color = BROWN
+            self.density = 0.5
         elif material == "stone":
             self.color = GRAY
+            self.density = 1.0
         elif material == "ice":
             self.color = BLUE
+            self.density = 0.3
             
     def draw(self, surface):
         if not self.destroyed:
-            pygame.draw.rect(surface, self.color, (self.x, self.y, self.width, self.height))
-            pygame.draw.rect(surface, DARK_GRAY, (self.x, self.y, self.width, self.height), 2)
+            # Save the current transform
+            block_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            pygame.draw.rect(block_surface, self.color, (0, 0, self.width, self.height))
+            pygame.draw.rect(block_surface, DARK_GRAY, (0, 0, self.width, self.height), 2)
             
             # Draw cracks if damaged
             if self.health < 70:
-                pygame.draw.line(surface, BLACK, (self.x, self.y + self.height//2), 
-                                (self.x + self.width, self.y + self.height//2), 2)
+                pygame.draw.line(block_surface, BLACK, (0, self.height//2), 
+                                (self.width, self.height//2), 2)
             if self.health < 40:
-                pygame.draw.line(surface, BLACK, (self.x + self.width//2, self.y), 
-                                (self.x + self.width//2, self.y + self.height), 2)
+                pygame.draw.line(block_surface, BLACK, (self.width//2, 0), 
+                                (self.width//2, self.height), 2)
+            
+            # Rotate and draw
+            rotated = pygame.transform.rotate(block_surface, self.rotation)
+            rect = rotated.get_rect(center=(self.x + self.width//2, self.y + self.height//2))
+            surface.blit(rotated, rect.topleft)
     
     def take_damage(self, amount):
         self.health -= amount
+        self.angular_velocity += random.uniform(-5, 5)
         if self.health <= 0:
             self.destroyed = True
             return True
@@ -177,6 +219,8 @@ class Pig:
         self.radius = 25
         self.health = 100
         self.destroyed = False
+        self.vx = 0
+        self.vy = 0
         
     def draw(self, surface):
         if not self.destroyed:
@@ -200,7 +244,7 @@ class Pig:
         return False
 
 def create_level(level_num):
-    global blocks, pigs, birds, bird_launched, trajectory_points, power, angle, game_state, birds_left
+    global blocks, pigs, birds, bird_launched, trajectory_points, power, angle, game_state, birds_left, current_bird_index
     
     blocks = []
     pigs = []
@@ -210,14 +254,16 @@ def create_level(level_num):
     power = 0
     angle = 0
     game_state = "aiming"
-    birds_left = 3
+    birds_left = 5
+    current_bird_index = 0
     
     # Create birds
     for i in range(birds_left):
-        birds.append(Bird(100 + i * 30, HEIGHT - 150))
+        birds.append(Bird(80 + i * 30, HEIGHT - 150))
     
     # Create slingshot bird
-    birds[0].x, birds[0].y = slingshot_pos
+    if birds:
+        birds[0].x, birds[0].y = slingshot_pos
     
     # Level 1 layout
     if level_num == 1:
@@ -236,9 +282,15 @@ def create_level(level_num):
         blocks.append(Block(780, HEIGHT - 200, 20, 60, "stone"))
         blocks.append(Block(730, HEIGHT - 220, 60, 20, "stone"))
         
+        # Tower 3
+        blocks.append(Block(820, HEIGHT - 200, 20, 60, "ice"))
+        blocks.append(Block(880, HEIGHT - 200, 20, 60, "ice"))
+        blocks.append(Block(830, HEIGHT - 220, 60, 20, "ice"))
+        
         # Pigs
         pigs.append(Pig(650, HEIGHT - 160))
         pigs.append(Pig(750, HEIGHT - 160))
+        pigs.append(Pig(850, HEIGHT - 160))
         pigs.append(Pig(700, HEIGHT - 240))
 
 def draw_sling():
@@ -259,19 +311,24 @@ def draw_power_bar():
         pygame.draw.rect(screen, WHITE, (20, 20, 200, 30), 2)
         pygame.draw.rect(screen, RED, (22, 22, power * 6.6, 26))
 
+def draw_birds_available():
+    font = pygame.font.SysFont(None, 36)
+    bird_text = font.render(f"Birds: {birds_left}", True, WHITE)
+    screen.blit(bird_text, (20, 60))
+    
+    # Draw bird icons
+    for i in range(birds_left):
+        pygame.draw.circle(screen, RED, (30 + i * 25, 100), 10)
+
 def draw_ui():
     # Score
     font = pygame.font.SysFont(None, 48)
     score_text = font.render(f"Score: {score}", True, WHITE)
     screen.blit(score_text, (WIDTH - 200, 20))
     
-    # Birds left
-    bird_text = font.render(f"Birds: {birds_left}", True, WHITE)
-    screen.blit(bird_text, (WIDTH - 200, 70))
-    
     # Level
     level_text = font.render(f"Level: {level}", True, WHITE)
-    screen.blit(level_text, (WIDTH - 200, 120))
+    screen.blit(level_text, (WIDTH - 200, 70))
     
     # Instructions
     font_small = pygame.font.SysFont(None, 28)
@@ -281,6 +338,9 @@ def draw_ui():
     elif game_state == "game_over":
         over_text = font.render("GAME OVER! Press R to restart", True, RED)
         screen.blit(over_text, (WIDTH//2 - over_text.get_width()//2, HEIGHT//2))
+    elif game_state == "level_complete":
+        complete_text = font.render("LEVEL COMPLETE! Press N for next level", True, GREEN)
+        screen.blit(complete_text, (WIDTH//2 - complete_text.get_width()//2, HEIGHT//2))
 
 def check_collisions():
     global score
@@ -299,10 +359,14 @@ def check_collisions():
         if not block.destroyed and active_bird.check_collision(block):
             # Calculate damage based on bird speed
             speed = math.sqrt(active_bird.vx**2 + active_bird.vy**2)
-            damage = min(100, max(10, speed * 2))
+            damage = min(100, max(10, speed * block.density * 2))
             
             if block.take_damage(damage):
                 score += 50
+            
+            # Transfer some momentum to the block
+            block.vx = active_bird.vx * 0.1
+            block.vy = active_bird.vy * 0.1
             
             # Bounce effect
             active_bird.vx *= -0.5
@@ -322,6 +386,10 @@ def check_collisions():
                 
                 if pig.take_damage(damage):
                     score += 100
+                
+                # Transfer momentum to pig
+                pig.vx = active_bird.vx * 0.5
+                pig.vy = active_bird.vy * 0.5
                 
                 # Bounce effect
                 active_bird.vx *= -0.7
@@ -346,6 +414,26 @@ def check_lose_condition():
         return True
     return False
 
+def next_bird():
+    global current_bird_index, game_state
+    
+    # Mark current bird as destroyed if it's still active
+    if current_bird_index < len(birds):
+        birds[current_bird_index].destroyed = True
+    
+    # Move to next bird
+    current_bird_index += 1
+    
+    # Check if we have more birds
+    if current_bird_index < len(birds):
+        # Position next bird in slingshot
+        birds[current_bird_index].x, birds[current_bird_index].y = slingshot_pos
+        game_state = "aiming"
+    else:
+        # No more birds
+        if check_lose_condition():
+            game_state = "game_over"
+
 # Create initial level
 create_level(level)
 
@@ -362,78 +450,125 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:
                 create_level(level)
+            if event.key == pygame.K_n and game_state == "level_complete":
+                level += 1
+                create_level(level)
             if event.key == pygame.K_ESCAPE:
                 running = False
                 
         if game_state == "aiming":
             if event.type == pygame.MOUSEBUTTONDOWN:
                 # Check if clicking on the bird
-                bird = birds[0] if birds else None
-                if bird and not bird.launched:
-                    dx = bird.x - mouse_x
-                    dy = bird.y - mouse_y
-                    distance = math.sqrt(dx**2 + dy**2)
-                    if distance < bird.radius:
-                        bird.dragging = True
-                        
+                if current_bird_index < len(birds):
+                    bird = birds[current_bird_index]
+                    if not bird.launched:
+                        dx = bird.x - mouse_x
+                        dy = bird.y - mouse_y
+                        distance = math.sqrt(dx**2 + dy**2)
+                        if distance < bird.radius:
+                            bird.dragging = True
+                            
             if event.type == pygame.MOUSEBUTTONUP:
-                bird = birds[0] if birds else None
-                if bird and bird.dragging:
-                    bird.dragging = False
-                    # Calculate launch power and angle
-                    dx = bird.start_x - bird.x
-                    dy = bird.start_y - bird.y
-                    power = min(max_power, math.sqrt(dx**2 + dy**2) / 5)
-                    angle = math.atan2(dy, dx)
-                    bird.launch(power, angle)
-                    bird_launched = True
-                    game_state = "flying"
-                    
+                if current_bird_index < len(birds):
+                    bird = birds[current_bird_index]
+                    if bird.dragging:
+                        bird.dragging = False
+                        # Calculate launch power and angle
+                        dx = bird.start_x - bird.x
+                        dy = bird.start_y - bird.y
+                        power = min(max_power, math.sqrt(dx**2 + dy**2) / 5)
+                        angle = math.atan2(dy, dx)
+                        bird.launch(power, angle)
+                        bird_launched = True
+                        birds_left -= 1
+                        game_state = "flying"
+    
     # Update dragging bird position
-    if game_state == "aiming" and birds and birds[0].dragging:
-        bird = birds[0]
-        bird.x = mouse_x
-        bird.y = mouse_y
-        
-        # Calculate trajectory
-        trajectory_points = []
-        power = min(max_power, math.sqrt((bird.start_x - bird.x)**2 + (bird.start_y - bird.y)**2) / 5)
-        angle = math.atan2(bird.start_y - bird.y, bird.start_x - bird.x)
-        
-        # Simulate trajectory
-        temp_x, temp_y = bird.start_x, bird.start_y
-        temp_vx = power * math.cos(angle)
-        temp_vy = power * math.sin(angle)
-        
-        for _ in range(30):
-            trajectory_points.append((temp_x, temp_y))
-            temp_vy += GRAVITY
-            temp_x += temp_vx
-            temp_y += temp_vy
+    if game_state == "aiming" and current_bird_index < len(birds):
+        bird = birds[current_bird_index]
+        if bird.dragging:
+            bird.x = mouse_x
+            bird.y = mouse_y
             
-            # Stop if hit ground
-            if temp_y > HEIGHT - 100:
-                break
+            # Calculate trajectory
+            trajectory_points = []
+            power = min(max_power, math.sqrt((bird.start_x - bird.x)**2 + (bird.start_y - bird.y)**2) / 5)
+            angle = math.atan2(bird.start_y - bird.y, bird.start_x - bird.x)
+            
+            # Simulate trajectory
+            temp_x, temp_y = bird.start_x, bird.start_y
+            temp_vx = power * math.cos(angle)
+            temp_vy = power * math.sin(angle)
+            
+            for _ in range(50):
+                trajectory_points.append((temp_x, temp_y))
+                temp_vy += GRAVITY * 0.5  # Reduced gravity for preview
+                temp_x += temp_vx
+                temp_y += temp_vy
+                
+                # Stop if hit ground
+                if temp_y > HEIGHT - 100:
+                    break
     
     # Update game objects
     if game_state == "flying":
         # Update birds
-        all_birds_destroyed = True
+        active_bird_exists = False
         for bird in birds:
             if bird.update():
                 # Bird went out of bounds, remove it
                 if bird.launched:
-                    birds_left -= 1
-            if not bird.destroyed:
-                all_birds_destroyed = False
+                    pass  # Already decremented birds_left
+            if not bird.destroyed and bird.launched:
+                active_bird_exists = True
                 
+        # If no active bird, go to next bird
+        if not active_bird_exists:
+            next_bird()
+                
+        # Update blocks
+        for block in blocks:
+            if not block.destroyed:
+                block.rotation += block.angular_velocity
+                block.angular_velocity *= 0.95  # Slow down rotation
+                
+                # Apply gravity to blocks that are not supported
+                block.vy += GRAVITY * 0.1
+                block.x += block.vx
+                block.y += block.vy
+                
+                # Apply damping
+                block.vx *= 0.98
+                block.vy *= 0.98
+                
+                # Ground collision for blocks
+                if block.y + block.height > HEIGHT - 100:
+                    block.y = HEIGHT - 100 - block.height
+                    block.vy = 0
+                    
+        # Update pigs
+        for pig in pigs:
+            if not pig.destroyed:
+                # Apply gravity
+                pig.vy += GRAVITY * 0.3
+                pig.x += pig.vx
+                pig.y += pig.vy
+                
+                # Apply damping
+                pig.vx *= 0.95
+                pig.vy *= 0.95
+                
+                # Ground collision for pigs
+                if pig.y + pig.radius > HEIGHT - 100:
+                    pig.y = HEIGHT - 100 - pig.radius
+                    pig.vy = 0
+        
         # Check collisions
         check_collisions()
         
         # Check win/lose conditions
         if check_win_condition():
-            level += 1
-            create_level(level)
+            game_state = "level_complete"
         elif check_lose_condition():
             game_state = "game_over"
     
@@ -472,6 +607,9 @@ while running:
     
     # Draw power bar
     draw_power_bar()
+    
+    # Draw birds available
+    draw_birds_available()
     
     # Draw UI
     draw_ui()
