@@ -1,333 +1,311 @@
+"""
+Chrome T-Rex (offline) game - Pygame single-file replica with improved Dino sprite
+- Controls: SPACE or UP to jump, DOWN to duck, R to restart after game over, ESC to quit
+- Features: running/jump/duck, obstacles, birds, score, speed increase, day/night
+
+Run: python chrome_trex_pygame.py
+Requires: pygame (pip install pygame)
+"""
+
 import pygame
 import random
 import sys
+import os
 
-# Initialize pygame
-pygame.init()
-
-# Game constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 400
-GROUND_HEIGHT = 100
+WIDTH, HEIGHT = 800, 200
 FPS = 60
-GRAVITY = 1
-JUMP_FORCE = -20
-GAME_SPEED = 5
-OBSTACLE_FREQUENCY = 1500  # milliseconds
+GROUND_Y = HEIGHT - 40
+GRAVITY = 0.9
+JUMP_VELOCITY = -14
+GAME_TITLE = "Chrome T-Rex - Pygame Replica"
 
-# Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GRAY = (83, 83, 83)
-LIGHT_GRAY = (247, 247, 247)
-RED = (255, 0, 0)
+BG_DAY = (247, 247, 247)
+BG_NIGHT = (20, 20, 20)
 
-# Set up the display
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Chrome T-Rex Game")
-clock = pygame.time.Clock()
+HS_FILE = "trex_highscore.txt"
 
-# Font
-font = pygame.font.SysFont('arial', 20)
-large_font = pygame.font.SysFont('arial', 40)
-
-class Dinosaur:
+class Dino:
     def __init__(self):
-        self.width = 50
-        self.height = 60
-        self.x = 80
-        self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height
-        self.vel_y = 0
-        self.jumping = False
+        self.x = 50
+        self.width = 44
+        self.height = 47
+        self.y = GROUND_Y - self.height
+        self.vy = 0
+        self.on_ground = True
         self.ducking = False
-        self.duck_height = 30
-        self.animation_counter = 0
-        self.running = True
-        self.eye_blink_counter = 0
-        self.eye_closed = False
-        
+        self.anim_time = 0
+
+    def rect(self):
+        h = self.height if not self.ducking else self.height * 0.6
+        y = self.y + (self.height - h)
+        return pygame.Rect(self.x, int(y), int(self.width), int(h))
+
     def jump(self):
-        if not self.jumping:
-            self.vel_y = JUMP_FORCE
-            self.jumping = True
-            
-    def duck(self, ducking):
-        self.ducking = ducking
-        
+        if self.on_ground:
+            self.vy = JUMP_VELOCITY
+            self.on_ground = False
+            self.ducking = False
+
+    def duck(self, val: bool):
+        if self.on_ground:
+            self.ducking = val
+
     def update(self):
-        # Apply gravity
-        if self.jumping:
-            self.y += self.vel_y
-            self.vel_y += GRAVITY
-            
-            # Check if landed
-            if self.y >= SCREEN_HEIGHT - GROUND_HEIGHT - self.height:
-                self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height
-                self.jumping = False
-                self.vel_y = 0
-                
-        # Animation
-        self.animation_counter = (self.animation_counter + 1) % 10
-        
-        # Eye blinking
-        self.eye_blink_counter = (self.eye_blink_counter + 1) % 120
-        if self.eye_blink_counter > 115:
-            self.eye_closed = True
+        self.vy += GRAVITY
+        self.y += self.vy
+        if self.y >= GROUND_Y - self.height:
+            self.y = GROUND_Y - self.height
+            self.vy = 0
+            self.on_ground = True
+        if self.on_ground and not self.ducking:
+            self.anim_time += 1
         else:
-            self.eye_closed = False
-        
-    def draw(self):
-        dino_height = self.duck_height if self.ducking else self.height
-        dino_y = self.y if not self.ducking else SCREEN_HEIGHT - GROUND_HEIGHT - self.duck_height
-        
-        # Draw dinosaur body
-        body_color = GRAY
-        
-        # Main body
-        pygame.draw.rect(screen, body_color, (self.x, dino_y + 10, self.width - 10, dino_height - 10))
-        
-        # Head
-        pygame.draw.rect(screen, body_color, (self.x + 25, dino_y, 20, 20))
-        
-        # Neck
-        pygame.draw.rect(screen, body_color, (self.x + 20, dino_y + 15, 10, 10))
-        
-        # Tail
-        pygame.draw.polygon(screen, body_color, [
-            (self.x, dino_y + dino_height - 10),
-            (self.x - 15, dino_y + dino_height - 5),
-            (self.x, dino_y + dino_height)
-        ])
-        
-        # Eye
-        if not self.eye_closed:
-            pygame.draw.circle(screen, BLACK, (self.x + 38, dino_y + 8), 3)
+            self.anim_time = 0
+
+    def draw(self, surf):
+        r = self.rect()
+        head_rect = pygame.Rect(r.x + 20, r.y, 20, 20)
+        pygame.draw.rect(surf, BLACK, head_rect)
+        pygame.draw.circle(surf, WHITE, (head_rect.x + 15, head_rect.y + 6), 3)
+        body_rect = pygame.Rect(r.x, r.y + 15, 30, 20)
+        pygame.draw.rect(surf, BLACK, body_rect)
+        pygame.draw.polygon(surf, BLACK, [(r.x, r.y + 25), (r.x - 10, r.y + 20), (r.x, r.y + 30)])
+        frame = (self.anim_time // 6) % 2
+        if frame == 0:
+            pygame.draw.rect(surf, BLACK, (r.x + 5, r.y + r.h - 6, 6, 6))
+            pygame.draw.rect(surf, BLACK, (r.x + 20, r.y + r.h - 4, 6, 6))
         else:
-            pygame.draw.line(screen, BLACK, (self.x + 35, dino_y + 10), (self.x + 41, dino_y + 10), 2)
-            
-        # Mouth
-        pygame.draw.ellipse(screen, RED, (self.x + 35, dino_y + 12, 10, 5))
-        
-        # Legs (running animation)
-        leg_offset = 0
-        if self.running and not self.jumping:
-            leg_offset = 5 if self.animation_counter < 5 else -5
-            
-        # Front leg
-        pygame.draw.rect(screen, body_color, (self.x + 15, dino_y + dino_height - 10, 8, 15 + leg_offset))
-        pygame.draw.ellipse(screen, body_color, (self.x + 12, dino_y + dino_height + 5 + leg_offset, 14, 8))
-        
-        # Back leg
-        pygame.draw.rect(screen, body_color, (self.x + 30, dino_y + dino_height - 10, 8, 15 - leg_offset))
-        pygame.draw.ellipse(screen, body_color, (self.x + 27, dino_y + dino_height + 5 - leg_offset, 14, 8))
-        
-        # Arm (when ducking)
-        if self.ducking:
-            pygame.draw.rect(screen, body_color, (self.x + 20, dino_y + 20, 15, 5))
-            pygame.draw.ellipse(screen, body_color, (self.x + 30, dino_y + 20, 8, 10))
+            pygame.draw.rect(surf, BLACK, (r.x + 5, r.y + r.h - 4, 6, 6))
+            pygame.draw.rect(surf, BLACK, (r.x + 20, r.y + r.h - 6, 6, 6))
 
 class Obstacle:
-    def __init__(self):
-        self.width = random.randint(20, 40)
-        self.height = random.randint(40, 70)
-        self.x = SCREEN_WIDTH
-        self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height
-        self.passed = False
-        self.type = random.choice(["cactus", "bird"])
-        
-        if self.type == "bird":
-            self.height = 30
-            self.width = 40
-            self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height - random.randint(30, 80)
-        
-    def update(self):
-        self.x -= GAME_SPEED
-        
-    def draw(self):
-        if self.type == "cactus":
-            # Draw cactus
-            pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height))
-            
-            # Draw cactus details
-            for i in range(random.randint(2, 4)):
-                offset_x = random.randint(5, self.width - 10)
-                offset_y = random.randint(10, self.height - 20)
-                branch_width = random.randint(5, 10)
-                branch_height = random.randint(15, 25)
-                pygame.draw.rect(screen, GRAY, (self.x + offset_x, self.y - branch_height + offset_y, branch_width, branch_height))
-                
-        else:  # Bird
-            # Draw bird body
-            pygame.draw.ellipse(screen, GRAY, (self.x, self.y, self.width, self.height))
-            
-            # Draw bird head
-            pygame.draw.circle(screen, GRAY, (self.x + self.width - 5, self.y + self.height//2), 8)
-            
-            # Draw bird eye
-            pygame.draw.circle(screen, BLACK, (self.x + self.width, self.y + self.height//2 - 2), 2)
-            
-            # Draw bird wing (flapping animation)
-            wing_offset = 5 if pygame.time.get_ticks() % 1000 < 500 else -5
-            pygame.draw.ellipse(screen, GRAY, (self.x + 10, self.y + wing_offset, 20, 15))
+    def __init__(self, x, speed):
+        self.x = x
+        self.speed = speed
+        if random.random() < 0.8:
+            self.type = 'cactus'
+            h = random.choice([30, 35, 40])
+            w = random.choice([12, 18, 22])
+            self.rects = []
+            groups = random.choice([1, 1, 2])
+            px = 0
+            for i in range(groups):
+                rw = w + random.randint(0, 6)
+                rh = h + random.randint(-5, 5)
+                r = pygame.Rect(0 + px, GROUND_Y - rh, rw, rh)
+                self.rects.append(r)
+                px += rw + 3
+            self.w = px
+            self.h = max(r.h for r in self.rects)
+            self.y = GROUND_Y - self.h
+        else:
+            self.type = 'bird'
+            self.w = 46
+            self.h = 30
+            self.y = GROUND_Y - self.h - random.choice([60, 45, 30])
 
-class Cloud:
-    def __init__(self):
-        self.x = SCREEN_WIDTH + random.randint(0, 300)
-        self.y = random.randint(50, 150)
-        self.speed = random.uniform(0.5, 1.5)
-        self.size = random.randint(30, 60)
-        
+    def get_rect(self):
+        return pygame.Rect(int(self.x), int(self.y), int(self.w), int(self.h))
+
     def update(self):
         self.x -= self.speed
-        if self.x < -100:
-            self.x = SCREEN_WIDTH + 50
-            self.y = random.randint(50, 150)
-            
-    def draw(self):
-        pygame.draw.circle(screen, LIGHT_GRAY, (self.x, self.y), self.size // 2)
-        pygame.draw.circle(screen, LIGHT_GRAY, (self.x + self.size // 2, self.y - self.size // 4), self.size // 2)
-        pygame.draw.circle(screen, LIGHT_GRAY, (self.x + self.size // 2, self.y + self.size // 4), self.size // 2)
-        pygame.draw.circle(screen, LIGHT_GRAY, (self.x + self.size, self.y), self.size // 2)
 
-class Game:
-    def __init__(self):
-        self.dinosaur = Dinosaur()
-        self.obstacles = []
-        self.clouds = [Cloud() for _ in range(4)]
-        self.score = 0
-        self.game_speed = GAME_SPEED
-        self.last_obstacle_time = pygame.time.get_ticks()
-        self.game_over = False
-        self.game_started = False
-        self.bird_frequency = 0.3  # 30% chance of bird
-        
-    def handle_events(self):
+    def draw(self, surf):
+        if self.type == 'cactus':
+            base_x = int(self.x)
+            for seg in self.rects:
+                r = pygame.Rect(base_x + seg.x, seg.y, seg.w, seg.h)
+                pygame.draw.rect(surf, BLACK, r)
+        else:
+            r = self.get_rect()
+            body = pygame.Rect(r.x, r.y + 8, r.w - 20, r.h - 10)
+            wing = [(r.x + 6, r.y + 8), (r.x + 22, r.y), (r.x + 30, r.y + 8)]
+            pygame.draw.rect(surf, BLACK, body)
+            pygame.draw.polygon(surf, BLACK, wing)
+
+class Ground:
+    def __init__(self, speed):
+        self.speed = speed
+        self.x = 0
+        self.image_w = WIDTH
+
+    def update(self):
+        self.x -= self.speed
+        if self.x <= -self.image_w:
+            self.x = 0
+
+    def draw(self, surf):
+        pygame.draw.line(surf, BLACK, (0, GROUND_Y), (WIDTH, GROUND_Y), 2)
+        for i in range(-20, WIDTH + 20, 40):
+            x = (i + int(self.x)) % (WIDTH + 40) - 20
+            pygame.draw.rect(surf, BLACK, (x, GROUND_Y - 6, 6, 6))
+
+class Cloud:
+    def __init__(self, x, y, speed):
+        self.x = x
+        self.y = y
+        self.speed = speed
+
+    def update(self):
+        self.x -= self.speed
+
+    def draw(self, surf):
+        pygame.draw.circle(surf, BLACK, (int(self.x), int(self.y)), 10, 1)
+        pygame.draw.circle(surf, BLACK, (int(self.x + 12), int(self.y - 6)), 12, 1)
+        pygame.draw.circle(surf, BLACK, (int(self.x + 24), int(self.y)), 10, 1)
+
+def load_highscore():
+    try:
+        with open(HS_FILE, 'r') as f:
+            return int(f.read().strip())
+    except Exception:
+        return 0
+
+def save_highscore(hs):
+    try:
+        with open(HS_FILE, 'w') as f:
+            f.write(str(int(hs)))
+    except Exception:
+        pass
+
+def main():
+    pygame.init()
+    global bg_color
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption(GAME_TITLE)
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont('Arial', 18)
+    big_font = pygame.font.SysFont('Arial', 24)
+
+    speed = 6.0
+    spawn_timer = 0
+    spawn_interval = 90
+    obstacles = []
+    clouds = [Cloud(WIDTH - 20, 40, 0.5), Cloud(WIDTH - 200, 30, 0.3)]
+    ground = Ground(speed)
+    dino = Dino()
+    score = 0
+    highscore = load_highscore()
+    playing = True
+    game_over = False
+    bg_is_day = True
+    bg_switch_score = 500
+
+    while True:
+        dt = clock.tick(FPS)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                save_highscore(highscore)
                 pygame.quit()
                 sys.exit()
-                
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE or event.key == pygame.K_UP:
-                    if not self.game_started:
-                        self.game_started = True
-                    if self.game_over:
-                        self.__init__()  # Reset game
-                    else:
-                        self.dinosaur.jump()
-                        
+                if event.key in (pygame.K_SPACE, pygame.K_UP):
+                    if playing and not game_over:
+                        dino.jump()
+                    elif game_over:
+                        score = 0
+                        speed = 6.0
+                        obstacles.clear()
+                        dino = Dino()
+                        game_over = False
+                        playing = True
+                        bg_is_day = True
                 if event.key == pygame.K_DOWN:
-                    self.dinosaur.duck(True)
-                    
+                    dino.duck(True)
+                if event.key == pygame.K_r:
+                    score = 0
+                    speed = 6.0
+                    obstacles.clear()
+                    dino = Dino()
+                    game_over = False
+                    playing = True
+                    bg_is_day = True
+                if event.key == pygame.K_ESCAPE:
+                    save_highscore(highscore)
+                    pygame.quit()
+                    sys.exit()
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_DOWN:
-                    self.dinosaur.duck(False)
-                    
-    def update(self):
-        if not self.game_started or self.game_over:
-            return
-            
-        current_time = pygame.time.get_ticks()
-        
-        # Update dinosaur
-        self.dinosaur.update()
-        
-        # Update clouds
-        for cloud in self.clouds:
-            cloud.update()
-        
-        # Generate new obstacles
-        if current_time - self.last_obstacle_time > OBSTACLE_FREQUENCY:
-            # Occasionally generate a bird
-            if random.random() < self.bird_frequency:
-                self.obstacles.append(Obstacle())
-            else:
-                self.obstacles.append(Obstacle())
-            self.last_obstacle_time = current_time
-            
-        # Update obstacles and check collisions
-        for obstacle in self.obstacles[:]:
-            obstacle.update()
-            
-            # Remove obstacles that are off screen
-            if obstacle.x + obstacle.width < 0:
-                self.obstacles.remove(obstacle)
-                continue
-                
-            # Check collision
-            dino_rect = pygame.Rect(
-                self.dinosaur.x + 10,
-                self.dinosaur.y + (self.dinosaur.height - self.dinosaur.duck_height if self.dinosaur.ducking else 0),
-                self.dinosaur.width - 20,
-                self.dinosaur.duck_height if self.dinosaur.ducking else self.dinosaur.height
-            )
-            
-            obstacle_rect = pygame.Rect(obstacle.x, obstacle.y, obstacle.width, obstacle.height)
-            
-            if dino_rect.colliderect(obstacle_rect):
-                self.game_over = True
-                
-            # Update score
-            if not obstacle.passed and obstacle.x + obstacle.width < self.dinosaur.x:
-                obstacle.passed = True
-                self.score += 1
-                
-        # Increase game speed over time
-        self.game_speed = GAME_SPEED + self.score // 100
-        for obstacle in self.obstacles:
-            obstacle.x -= (self.game_speed - GAME_SPEED)
-        
-    def draw(self):
-        # Draw sky background
-        screen.fill(WHITE)
-        
-        # Draw clouds
-        for cloud in self.clouds:
-            cloud.draw()
-        
-        # Draw ground
-        pygame.draw.rect(screen, GRAY, (0, SCREEN_HEIGHT - GROUND_HEIGHT, SCREEN_WIDTH, GROUND_HEIGHT))
-        
-        # Draw ground details
-        for i in range(0, SCREEN_WIDTH, 30):
-            pygame.draw.line(screen, (100, 100, 100), 
-                            (i, SCREEN_HEIGHT - GROUND_HEIGHT + 20), 
-                            (i + 15, SCREEN_HEIGHT - GROUND_HEIGHT + 20), 2)
-        
-        # Draw dinosaur
-        self.dinosaur.draw()
-        
-        # Draw obstacles
-        for obstacle in self.obstacles:
-            obstacle.draw()
-            
-        # Draw score
-        score_text = font.render(f"Score: {self.score}", True, GRAY)
-        screen.blit(score_text, (SCREEN_WIDTH - 150, 20))
-        
-        # Draw game over message
-        if self.game_over:
-            game_over_text = large_font.render("GAME OVER", True, GRAY)
-            restart_text = font.render("Press SPACE to restart", True, GRAY)
-            screen.blit(game_over_text, (SCREEN_WIDTH//2 - game_over_text.get_width()//2, SCREEN_HEIGHT//2 - 50))
-            screen.blit(restart_text, (SCREEN_WIDTH//2 - restart_text.get_width()//2, SCREEN_HEIGHT//2 + 10))
-            
-        # Draw start message
-        if not self.game_started:
-            start_text = large_font.render("Press SPACE to Start", True, GRAY)
-            screen.blit(start_text, (SCREEN_WIDTH//2 - start_text.get_width()//2, SCREEN_HEIGHT//2 - 50))
-            
-            hint_text = font.render("SPACE: Jump, DOWN: Duck", True, GRAY)
-            screen.blit(hint_text, (SCREEN_WIDTH//2 - hint_text.get_width()//2, SCREEN_HEIGHT//2 + 10))
+                    dino.duck(False)
 
-# Create game instance
-game = Game()
+        if playing and not game_over:
+            if score and score % 100 == 0:
+                speed = 6.0 + (score // 100) * 0.5
 
-# Main game loop
-while True:
-    game.handle_events()
-    game.update()
-    game.draw()
-    
-    pygame.display.flip()
-    clock.tick(FPS)
+            spawn_timer += 1
+            if spawn_timer >= spawn_interval:
+                spawn_timer = 0
+                a = max(40, int(90 - speed * 6))
+                spawn_interval = random.randint(a, a + 60)
+                obstacles.append(Obstacle(WIDTH + 20, speed))
+
+            if random.random() < 0.01:
+                clouds.append(Cloud(WIDTH + 30, random.randint(20, 80), speed * 0.08))
+
+            for ob in obstacles:
+                ob.speed = speed
+                ob.update()
+            obstacles = [o for o in obstacles if o.x + o.w > -50]
+
+            for c in clouds:
+                c.update()
+            clouds = [c for c in clouds if c.x > -60]
+
+            ground.speed = speed
+            ground.update()
+            dino.update()
+
+            dino_rect = dino.rect()
+            for ob in obstacles:
+                if ob.type == 'cactus':
+                    base_x = int(ob.x)
+                    for seg in ob.rects:
+                        seg_rect = pygame.Rect(base_x + seg.x, seg.y, seg.w, seg.h)
+                        if dino_rect.colliderect(seg_rect):
+                            game_over = True
+                            playing = False
+                else:
+                    if dino_rect.colliderect(ob.get_rect()):
+                        game_over = True
+                        playing = False
+
+            score += 1
+            if score > highscore:
+                highscore = score
+
+            if score >= bg_switch_score:
+                bg_is_day = not bg_is_day
+                bg_switch_score += 500
+
+        bg_color = BG_DAY if bg_is_day else BG_NIGHT
+        screen.fill(bg_color)
+
+        for c in clouds:
+            c.draw(screen)
+
+        ground.draw(screen)
+
+        for ob in obstacles:
+            ob.draw(screen)
+
+        dino.draw(screen)
+
+        score_text = font.render(f"Score: {score}", True, BLACK if bg_is_day else WHITE)
+        hs_text = font.render(f"Highscore: {highscore}", True, BLACK if bg_is_day else WHITE)
+        screen.blit(score_text, (WIDTH - 140, 10))
+        screen.blit(hs_text, (WIDTH - 300, 10))
+
+        if game_over:
+            over_text = big_font.render("GAME OVER", True, BLACK if bg_is_day else WHITE)
+            restart_text = font.render("Press R or SPACE to restart", True, BLACK if bg_is_day else WHITE)
+            screen.blit(over_text, (WIDTH//2 - over_text.get_width()//2, HEIGHT//2 - 20))
+            screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 10))
+            save_highscore(highscore)
+
+        pygame.display.flip()
+
+if __name__ == '__main__':
+    main()
