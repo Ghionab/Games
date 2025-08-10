@@ -20,6 +20,7 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GRAY = (83, 83, 83)
 LIGHT_GRAY = (247, 247, 247)
+RED = (255, 0, 0)
 
 # Set up the display
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -32,7 +33,7 @@ large_font = pygame.font.SysFont('arial', 40)
 
 class Dinosaur:
     def __init__(self):
-        self.width = 44
+        self.width = 50
         self.height = 60
         self.x = 80
         self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height
@@ -42,6 +43,8 @@ class Dinosaur:
         self.duck_height = 30
         self.animation_counter = 0
         self.running = True
+        self.eye_blink_counter = 0
+        self.eye_closed = False
         
     def jump(self):
         if not self.jumping:
@@ -66,26 +69,62 @@ class Dinosaur:
         # Animation
         self.animation_counter = (self.animation_counter + 1) % 10
         
+        # Eye blinking
+        self.eye_blink_counter = (self.eye_blink_counter + 1) % 120
+        if self.eye_blink_counter > 115:
+            self.eye_closed = True
+        else:
+            self.eye_closed = False
+        
     def draw(self):
-        # Draw dinosaur body
         dino_height = self.duck_height if self.ducking else self.height
         dino_y = self.y if not self.ducking else SCREEN_HEIGHT - GROUND_HEIGHT - self.duck_height
         
-        pygame.draw.rect(screen, GRAY, (self.x, dino_y, self.width, dino_height))
+        # Draw dinosaur body
+        body_color = GRAY
         
-        # Draw dinosaur eye
-        eye_x = self.x + self.width - 15
-        eye_y = dino_y + 15 if self.ducking else dino_y + 15
-        pygame.draw.circle(screen, BLACK, (eye_x, eye_y), 5)
+        # Main body
+        pygame.draw.rect(screen, body_color, (self.x, dino_y + 10, self.width - 10, dino_height - 10))
         
-        # Draw dinosaur legs (animation)
+        # Head
+        pygame.draw.rect(screen, body_color, (self.x + 25, dino_y, 20, 20))
+        
+        # Neck
+        pygame.draw.rect(screen, body_color, (self.x + 20, dino_y + 15, 10, 10))
+        
+        # Tail
+        pygame.draw.polygon(screen, body_color, [
+            (self.x, dino_y + dino_height - 10),
+            (self.x - 15, dino_y + dino_height - 5),
+            (self.x, dino_y + dino_height)
+        ])
+        
+        # Eye
+        if not self.eye_closed:
+            pygame.draw.circle(screen, BLACK, (self.x + 38, dino_y + 8), 3)
+        else:
+            pygame.draw.line(screen, BLACK, (self.x + 35, dino_y + 10), (self.x + 41, dino_y + 10), 2)
+            
+        # Mouth
+        pygame.draw.ellipse(screen, RED, (self.x + 35, dino_y + 12, 10, 5))
+        
+        # Legs (running animation)
         leg_offset = 0
         if self.running and not self.jumping:
             leg_offset = 5 if self.animation_counter < 5 else -5
             
-        leg_y = dino_y + dino_height
-        pygame.draw.rect(screen, GRAY, (self.x + 10, leg_y, 8, 15 + leg_offset))
-        pygame.draw.rect(screen, GRAY, (self.x + self.width - 18, leg_y, 8, 15 - leg_offset))
+        # Front leg
+        pygame.draw.rect(screen, body_color, (self.x + 15, dino_y + dino_height - 10, 8, 15 + leg_offset))
+        pygame.draw.ellipse(screen, body_color, (self.x + 12, dino_y + dino_height + 5 + leg_offset, 14, 8))
+        
+        # Back leg
+        pygame.draw.rect(screen, body_color, (self.x + 30, dino_y + dino_height - 10, 8, 15 - leg_offset))
+        pygame.draw.ellipse(screen, body_color, (self.x + 27, dino_y + dino_height + 5 - leg_offset, 14, 8))
+        
+        # Arm (when ducking)
+        if self.ducking:
+            pygame.draw.rect(screen, body_color, (self.x + 20, dino_y + 20, 15, 5))
+            pygame.draw.ellipse(screen, body_color, (self.x + 30, dino_y + 20, 8, 10))
 
 class Obstacle:
     def __init__(self):
@@ -94,20 +133,42 @@ class Obstacle:
         self.x = SCREEN_WIDTH
         self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height
         self.passed = False
+        self.type = random.choice(["cactus", "bird"])
+        
+        if self.type == "bird":
+            self.height = 30
+            self.width = 40
+            self.y = SCREEN_HEIGHT - GROUND_HEIGHT - self.height - random.randint(30, 80)
         
     def update(self):
         self.x -= GAME_SPEED
         
     def draw(self):
-        pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height))
-        
-        # Draw some details on the cactus
-        for i in range(3):
-            if random.random() > 0.3:
-                pygame.draw.rect(screen, GRAY, 
-                                (self.x - 5 + random.randint(0, self.width), 
-                                 self.y + random.randint(5, self.height - 10), 
-                                 5, 10))
+        if self.type == "cactus":
+            # Draw cactus
+            pygame.draw.rect(screen, GRAY, (self.x, self.y, self.width, self.height))
+            
+            # Draw cactus details
+            for i in range(random.randint(2, 4)):
+                offset_x = random.randint(5, self.width - 10)
+                offset_y = random.randint(10, self.height - 20)
+                branch_width = random.randint(5, 10)
+                branch_height = random.randint(15, 25)
+                pygame.draw.rect(screen, GRAY, (self.x + offset_x, self.y - branch_height + offset_y, branch_width, branch_height))
+                
+        else:  # Bird
+            # Draw bird body
+            pygame.draw.ellipse(screen, GRAY, (self.x, self.y, self.width, self.height))
+            
+            # Draw bird head
+            pygame.draw.circle(screen, GRAY, (self.x + self.width - 5, self.y + self.height//2), 8)
+            
+            # Draw bird eye
+            pygame.draw.circle(screen, BLACK, (self.x + self.width, self.y + self.height//2 - 2), 2)
+            
+            # Draw bird wing (flapping animation)
+            wing_offset = 5 if pygame.time.get_ticks() % 1000 < 500 else -5
+            pygame.draw.ellipse(screen, GRAY, (self.x + 10, self.y + wing_offset, 20, 15))
 
 class Cloud:
     def __init__(self):
@@ -138,6 +199,7 @@ class Game:
         self.last_obstacle_time = pygame.time.get_ticks()
         self.game_over = False
         self.game_started = False
+        self.bird_frequency = 0.3  # 30% chance of bird
         
     def handle_events(self):
         for event in pygame.event.get():
@@ -176,7 +238,11 @@ class Game:
         
         # Generate new obstacles
         if current_time - self.last_obstacle_time > OBSTACLE_FREQUENCY:
-            self.obstacles.append(Obstacle())
+            # Occasionally generate a bird
+            if random.random() < self.bird_frequency:
+                self.obstacles.append(Obstacle())
+            else:
+                self.obstacles.append(Obstacle())
             self.last_obstacle_time = current_time
             
         # Update obstacles and check collisions
